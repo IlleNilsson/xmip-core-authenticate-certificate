@@ -25,6 +25,18 @@ usage, and `.with_clock(...)` where a test pins the time. Offline throughout
 (ADR-0045): anchors and lists are held, never fetched; OCSP waits for the
 `online` switch.
 
+## Hybrid, behind a feature
+
+With `features = ["hybrid"]`, a certificate that also carries an ML-DSA
+alternative signature (ITU-T X.509 (10/2019) clause 9.8: classical and
+post-quantum in one certificate, legacy verifiers untroubled) has that
+signature verified along the same path, under the policy
+`.requiring(Hybrid::...)` states: `Ignored`, `WherePresent` (the default;
+held to it where carried, classical otherwise) or `Required` (every
+certificate on the path, or refused saying which one lacks it). Off, the
+extensions are not looked at and no post-quantum code ships (ADR-0033,
+amendment 2026-09-18).
+
 ## Dependencies
 
 Its capability with the `x509` feature on, `context` for `Verified` and
@@ -41,9 +53,10 @@ here.
 
 ## Verification
 
-`cargo test`: seven tests — a chain to a held anchor naming the claim is
+`cargo test`: eight tests — a chain to a held anchor naming the claim is
 proven; one naming someone else, one expired, one revoked and one whose
 reported fingerprint is not the leaf's are refused saying so; a claim
-without the chain proof, and another mechanism's claim, are refused by name.
+without the chain proof, and another mechanism's claim, are refused by name;
+a hybrid chain is proven where required and a classical one is not.
 The included workflow is manual-only and calls the versioned shared workflow
 at `IlleNilsson/.github@v1`.
