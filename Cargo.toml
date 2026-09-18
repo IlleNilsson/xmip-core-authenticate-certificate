@@ -21,6 +21,18 @@ publish = false
 [lib]
 path = "src/lib.rs"
 
+[dependencies]
+# The gate's own trait, with its x509 module turned on: the chain walk,
+# the names and the revocation lists are the capability's (ADR-0044).
+# context for Verified, xcore for the mechanism.
+authenticate = { package = "xmip-core-authenticate", git = "https://github.com/IlleNilsson/xmip-core-authenticate", branch = "main", features = ["x509"] }
+context = { package = "xmip-core-context", git = "https://github.com/IlleNilsson/xmip-core-context", branch = "main" }
+xcore = { package = "xmip-core", git = "https://github.com/IlleNilsson/xmip-core", branch = "main" }
+
+[dev-dependencies]
+# The tests mint their own chains; `mint` ships in no build.
+authenticate = { package = "xmip-core-authenticate", git = "https://github.com/IlleNilsson/xmip-core-authenticate", branch = "main", features = ["mint"] }
+
 [lints.rust]
 # forbid, not deny: a module has no business writing unsafe. The one exception
 # in the estate is xmip-core-abi, which holds the extern "C" vtable over
