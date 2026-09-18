@@ -16,7 +16,14 @@
 //! instance certificate — so nothing proved it before this gate did, and the
 //! usage it must be for is configuration, `Usage::Any` unless said. The
 //! certificate a handshake proved is `mutual-tls`, another gate's.
+//!
+//! With the `hybrid` feature, a certificate that also carries an ML-DSA
+//! alternative signature (ITU-T X.509 (10/2019) clause 9.8) has that
+//! verified along the same path, under the [`Hybrid`] policy the node
+//! states: ignored, where present, or required end to end.
 
+#[cfg(feature = "hybrid")]
+pub use authenticate::x509::alt::Hybrid;
 use authenticate::x509::{Anchors, Chain, Name, Revocation, Usage, verify};
 use authenticate::{AuthenticateError, Authenticator, Presented};
 use context::Verified;
@@ -47,6 +54,8 @@ pub struct Verifier {
     anchors: Anchors,
     revocation: Option<Revocation>,
     usage: Usage,
+    #[cfg(feature = "hybrid")]
+    hybrid: Hybrid,
     clock: Clock,
 }
 
@@ -59,8 +68,19 @@ impl Verifier {
             anchors,
             revocation: None,
             usage: Usage::Any,
+            #[cfg(feature = "hybrid")]
+            hybrid: Hybrid::WherePresent,
             clock: Box::new(now),
         }
+    }
+
+    /// What the node requires of alternative, post-quantum signatures along
+    /// the path: where present unless said.
+    #[cfg(feature = "hybrid")]
+    #[must_use]
+    pub const fn requiring(mut self, hybrid: Hybrid) -> Self {
+        self.hybrid = hybrid;
+        self
     }
 
     /// Refuse a certificate on any of these lists, and one no list covers.
@@ -102,13 +122,17 @@ impl Authenticator for Verifier {
             .ok_or_else(|| AuthenticateError::new(format!("no {CHAIN} proof was presented")))?;
         let chain = Chain::from_pem(pem)?;
 
-        verify(
+        let path = verify(
             &chain,
             &self.anchors,
             self.usage,
             self.revocation.as_ref(),
             (self.clock)(),
         )?;
+        #[cfg(feature = "hybrid")]
+        authenticate::x509::alt::verify_alt(&path, self.hybrid)?;
+        #[cfg(not(feature = "hybrid"))]
+        drop(path);
 
         if !Name::names(chain.leaf(), &presented.value)? {
             return Err(AuthenticateError::new(format!(
@@ -217,6 +241,34 @@ mod tests {
             )
             .expect_err("refused");
         assert!(failure.message.contains("fingerprint"), "{failure}");
+    }
+
+    #[cfg(feature = "hybrid")]
+    #[test]
+    fn a_hybrid_chain_is_proven_where_required_and_a_classical_one_is_not() {
+        let root = Authority::hybrid_root("Partner Root");
+        let issued = root.issue("partner-x.example", NOW - DAY, NOW + DAY);
+        let claim = presented(&issued, "CN=partner-x.example,O=Partner X");
+
+        verifier(&root)
+            .requiring(Hybrid::Required)
+            .verify(&claim)
+            .expect("quantum-safe end to end");
+
+        let classical = Authority::root("Partner Root");
+        let issued = classical.issue("partner-x.example", NOW - DAY, NOW + DAY);
+        let claim = presented(&issued, "CN=partner-x.example,O=Partner X");
+        verifier(&classical)
+            .verify(&claim)
+            .expect("where present, nothing to check");
+        let failure = verifier(&classical)
+            .requiring(Hybrid::Required)
+            .verify(&claim)
+            .expect_err("required");
+        assert!(
+            failure.message.contains("no alternative signature"),
+            "{failure}"
+        );
     }
 
     #[test]
