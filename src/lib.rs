@@ -1,6 +1,239 @@
 #![forbid(unsafe_code)]
-//! Authenticate by certificate: verifies a certificate chain to a configured trust anchor,
-//! validity and revocation as ADR-0033 says.
+
+//! Authenticate by certificate: verifies a certificate chain to a configured
+//! trust anchor, validity and revocation as ADR-0033 says.
 //!
-//! Declared and not yet written: `architecture.toml` carries the maturity. When it
-//! is, it implements `Authenticator` (ADR-0050).
+//! The first gate read the peer certificate's subject and presented it as the
+//! claim, with the chain the peer sent riding as the `certificate.chain`
+//! proof. This gate walks that chain to one of the anchors the node holds,
+//! at the clock it is given, against the revocation lists it was configured
+//! with, and then asks whether the leaf it verified names the value that was
+//! claimed — as its subject or as one of its DNS names — and whether the
+//! fingerprint the transport reported is the leaf's. Offline throughout
+//! (ADR-0045): anchors and lists are configuration, never fetched.
+//!
+//! This is the certificate outside a TLS handshake — S/MIME in AS2, an OPC UA
+//! instance certificate — so nothing proved it before this gate did, and the
+//! usage it must be for is configuration, `Usage::Any` unless said. The
+//! certificate a handshake proved is `mutual-tls`, another gate's.
+
+use authenticate::x509::{Anchors, Chain, Name, Revocation, Usage, verify};
+use authenticate::{AuthenticateError, Authenticator, Presented};
+use context::Verified;
+use std::time::{SystemTime, UNIX_EPOCH};
+use xcore::{Mechanism, mechanism};
+
+/// The proof the identify sibling attaches the chain under, PEM, leaf first.
+pub const CHAIN: &str = "certificate.chain";
+
+/// The evidence the transport reports the leaf's fingerprint under.
+pub const FINGERPRINT: &str = "tls.peer.fingerprint";
+
+type Clock = Box<dyn Fn() -> i64 + Send + Sync>;
+
+/// Seconds since the Unix epoch, now.
+#[must_use]
+pub fn now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |since| {
+            i64::try_from(since.as_secs()).unwrap_or(i64::MAX)
+        })
+}
+
+/// The certificate authenticator: the anchors the node holds and what it
+/// requires of a chain.
+pub struct Verifier {
+    anchors: Anchors,
+    revocation: Option<Revocation>,
+    usage: Usage,
+    clock: Clock,
+}
+
+impl Verifier {
+    /// Verifies against these anchors, for any usage, with no revocation
+    /// list and the system clock.
+    #[must_use]
+    pub fn new(anchors: Anchors) -> Self {
+        Self {
+            anchors,
+            revocation: None,
+            usage: Usage::Any,
+            clock: Box::new(now),
+        }
+    }
+
+    /// Refuse a certificate on any of these lists, and one no list covers.
+    #[must_use]
+    pub fn revoking(mut self, revocation: Revocation) -> Self {
+        self.revocation = Some(revocation);
+        self
+    }
+
+    /// Require the leaf to be for this usage.
+    #[must_use]
+    pub const fn for_usage(mut self, usage: Usage) -> Self {
+        self.usage = usage;
+        self
+    }
+
+    /// Where the time comes from; the tests pin it.
+    #[must_use]
+    pub fn with_clock(mut self, clock: impl Fn() -> i64 + Send + Sync + 'static) -> Self {
+        self.clock = Box::new(clock);
+        self
+    }
+}
+
+impl Authenticator for Verifier {
+    fn mechanism(&self) -> Mechanism {
+        mechanism::certificate()
+    }
+
+    fn verify(&self, presented: &Presented) -> Result<Verified, AuthenticateError> {
+        let name = presented.mechanism.name();
+        if name != self.mechanism().name() {
+            return Err(AuthenticateError::new(format!(
+                "'{name}' was presented and this authenticator verifies certificate"
+            )));
+        }
+        let pem = presented
+            .proof(CHAIN)
+            .ok_or_else(|| AuthenticateError::new(format!("no {CHAIN} proof was presented")))?;
+        let chain = Chain::from_pem(pem)?;
+
+        verify(
+            &chain,
+            &self.anchors,
+            self.usage,
+            self.revocation.as_ref(),
+            (self.clock)(),
+        )?;
+
+        if !Name::names(chain.leaf(), &presented.value)? {
+            return Err(AuthenticateError::new(format!(
+                "the verified certificate does not name '{}'",
+                presented.value
+            )));
+        }
+
+        let reported = presented
+            .evidence
+            .iter()
+            .find(|(evidence, _)| evidence == FINGERPRINT)
+            .map(|(_, fingerprint)| fingerprint.trim());
+        if let Some(reported) = reported
+            && !reported.eq_ignore_ascii_case(&chain.fingerprint())
+        {
+            return Err(AuthenticateError::new(
+                "the fingerprint the transport reported is not the verified leaf's",
+            ));
+        }
+
+        Ok(Verified::Proven)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use authenticate::x509::mint::{Authority, Issued};
+
+    const NOW: i64 = 1_800_000_000;
+    const DAY: i64 = 86_400;
+
+    fn verifier(root: &Authority) -> Verifier {
+        Verifier::new(Anchors::from_pem(&root.pem()).expect("anchors")).with_clock(|| NOW)
+    }
+
+    fn presented(issued: &Issued, subject: &str) -> Presented {
+        Presented::passed(mechanism::certificate(), subject).with_proof(CHAIN, &issued.pem)
+    }
+
+    #[test]
+    fn a_chain_to_a_held_anchor_naming_the_claim_is_proven() {
+        let root = Authority::root("Partner Root");
+        let issuing = root.intermediate("Partner Issuing CA");
+        let issued = issuing.issue("partner-x.example", NOW - DAY, NOW + DAY);
+
+        let verified = verifier(&root)
+            .verify(&presented(&issued, "O=Partner X, CN=partner-x.example"))
+            .expect("proven");
+        assert_eq!(verified, Verified::Proven);
+    }
+
+    #[test]
+    fn a_verified_chain_that_names_someone_else_is_refused() {
+        let root = Authority::root("Partner Root");
+        let issued = root.issue("partner-x.example", NOW - DAY, NOW + DAY);
+
+        let failure = verifier(&root)
+            .verify(&presented(&issued, "CN=partner-y.example,O=Partner X"))
+            .expect_err("refused");
+        assert!(failure.message.contains("does not name"), "{failure}");
+    }
+
+    #[test]
+    fn an_expired_certificate_is_refused_saying_so() {
+        let root = Authority::root("Partner Root");
+        let issued = root.issue("partner-x.example", NOW - 2 * DAY, NOW - DAY);
+
+        let failure = verifier(&root)
+            .verify(&presented(&issued, "CN=partner-x.example,O=Partner X"))
+            .expect_err("refused");
+        assert!(failure.message.contains("expired"), "{failure}");
+    }
+
+    #[test]
+    fn a_revoked_certificate_is_refused_where_a_list_is_held() {
+        let root = Authority::root("Partner Root");
+        let issued = root.issue("partner-x.example", NOW - DAY, NOW + DAY);
+        let lists = Revocation::from_pem(&root.crl(&[&issued], NOW)).expect("a list");
+
+        let failure = verifier(&root)
+            .revoking(lists)
+            .verify(&presented(&issued, "CN=partner-x.example,O=Partner X"))
+            .expect_err("refused");
+        assert!(failure.message.contains("revoked"), "{failure}");
+    }
+
+    #[test]
+    fn a_fingerprint_the_transport_reported_must_be_the_leafs() {
+        let root = Authority::root("Partner Root");
+        let issued = root.issue("partner-x.example", NOW - DAY, NOW + DAY);
+        let chain = Chain::from_pem(&issued.pem).expect("a chain");
+
+        verifier(&root)
+            .verify(
+                &presented(&issued, "CN=partner-x.example,O=Partner X")
+                    .with_evidence(FINGERPRINT, chain.fingerprint().to_uppercase()),
+            )
+            .expect("the leaf's own");
+
+        let failure = verifier(&root)
+            .verify(
+                &presented(&issued, "CN=partner-x.example,O=Partner X")
+                    .with_evidence(FINGERPRINT, "SHA256:ab12"),
+            )
+            .expect_err("refused");
+        assert!(failure.message.contains("fingerprint"), "{failure}");
+    }
+
+    #[test]
+    fn a_claim_without_the_chain_proof_cannot_be_verified() {
+        let root = Authority::root("Partner Root");
+        let claim = Presented::passed(mechanism::certificate(), "CN=partner-x.example");
+
+        let failure = verifier(&root).verify(&claim).expect_err("no proof");
+        assert!(failure.message.contains(CHAIN), "{failure}");
+    }
+
+    #[test]
+    fn another_mechanisms_claim_is_refused_by_name() {
+        let root = Authority::root("Partner Root");
+        let claim = Presented::passed(mechanism::mutual_tls(), "CN=partner-x.example");
+
+        let failure = verifier(&root).verify(&claim).expect_err("not ours");
+        assert!(failure.message.contains("mutual-tls"), "{failure}");
+    }
+}
