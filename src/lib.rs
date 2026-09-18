@@ -272,6 +272,26 @@ mod tests {
     }
 
     #[test]
+    fn a_smart_card_certificate_proves_its_user_principal_name_in_either_spelling() {
+        // ADR-0054: a claim that is a user principal name is proven by the
+        // name the verified leaf carries for its user, compared as accounts.
+        let root = Authority::root("Partner Root");
+        let issued = root.issue_for_user("jane", "Jane@Partner-X.Example", NOW - DAY, NOW + DAY);
+
+        for spelling in ["jane@partner-x.example", "PARTNER-X.EXAMPLE\\jane"] {
+            let verified = verifier(&root)
+                .verify(&presented(&issued, spelling))
+                .expect("the same account");
+            assert_eq!(verified, Verified::Proven, "{spelling}");
+        }
+
+        let failure = verifier(&root)
+            .verify(&presented(&issued, "john@partner-x.example"))
+            .expect_err("another account");
+        assert!(failure.message.contains("does not name"), "{failure}");
+    }
+
+    #[test]
     fn a_claim_without_the_chain_proof_cannot_be_verified() {
         let root = Authority::root("Partner Root");
         let claim = Presented::passed(mechanism::certificate(), "CN=partner-x.example");
