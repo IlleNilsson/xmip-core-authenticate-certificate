@@ -10,7 +10,10 @@ and presented it, with the chain the peer sent riding as the
 the node holds, at the clock it is given, against the CRLs it was configured
 with, then checks that the leaf names the claimed value — as its subject or
 one of its DNS names — and that the fingerprint the transport reported is
-the leaf's. Every refusal says why in words an operator can act on.
+the leaf's. A claim that is a user principal name, `jane@partner-x.example`
+or `PARTNER-X.EXAMPLE\jane`, is proven by the name a smart-card certificate
+carries for its user in its alternative names, compared as accounts
+(ADR-0054). Every refusal says why in words an operator can act on.
 
 This is the certificate *outside* a TLS handshake — S/MIME in AS2, an OPC UA
 instance certificate — so nothing proved it before this gate did, and the
@@ -53,10 +56,11 @@ here.
 
 ## Verification
 
-`cargo test`: eight tests — a chain to a held anchor naming the claim is
+`cargo test`: nine tests — a chain to a held anchor naming the claim is
 proven; one naming someone else, one expired, one revoked and one whose
 reported fingerprint is not the leaf's are refused saying so; a claim
 without the chain proof, and another mechanism's claim, are refused by name;
-a hybrid chain is proven where required and a classical one is not.
+a hybrid chain is proven where required and a classical one is not; a
+smart-card certificate proves its user principal name in either spelling.
 The included workflow is manual-only and calls the versioned shared workflow
 at `IlleNilsson/.github@v1`.
