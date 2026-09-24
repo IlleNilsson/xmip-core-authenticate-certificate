@@ -22,31 +22,14 @@
 //! verified along the same path, under the [`Hybrid`] policy the node
 //! states: ignored, where present, or required end to end.
 
+use authenticate::clock::Clock;
 #[cfg(feature = "hybrid")]
 pub use authenticate::x509::alt::Hybrid;
 use authenticate::x509::{Anchors, Chain, Name, Revocation, Usage, verify};
 use authenticate::{AuthenticateError, Authenticator, Presented};
 use context::Verified;
-use std::time::{SystemTime, UNIX_EPOCH};
+use identify::evidence::{self, CERTIFICATE_CHAIN};
 use xcore::{Mechanism, mechanism};
-
-/// The proof the identify sibling attaches the chain under, PEM, leaf first.
-pub const CHAIN: &str = "certificate.chain";
-
-/// The evidence the transport reports the leaf's fingerprint under.
-pub const FINGERPRINT: &str = "tls.peer.fingerprint";
-
-type Clock = Box<dyn Fn() -> i64 + Send + Sync>;
-
-/// Seconds since the Unix epoch, now.
-#[must_use]
-pub fn now() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |since| {
-            i64::try_from(since.as_secs()).unwrap_or(i64::MAX)
-        })
-}
 
 /// The certificate authenticator: the anchors the node holds and what it
 /// requires of a chain.
@@ -70,7 +53,7 @@ impl Verifier {
             usage: Usage::Any,
             #[cfg(feature = "hybrid")]
             hybrid: Hybrid::WherePresent,
-            clock: Box::new(now),
+            clock: Clock::system(0),
         }
     }
 
@@ -100,7 +83,7 @@ impl Verifier {
     /// Where the time comes from; the tests pin it.
     #[must_use]
     pub fn with_clock(mut self, clock: impl Fn() -> i64 + Send + Sync + 'static) -> Self {
-        self.clock = Box::new(clock);
+        self.clock = self.clock.reading(clock);
         self
     }
 }
@@ -118,8 +101,10 @@ impl Authenticator for Verifier {
             )));
         }
         let pem = presented
-            .proof(CHAIN)
-            .ok_or_else(|| AuthenticateError::new(format!("no {CHAIN} proof was presented")))?;
+            .proof(evidence::CERTIFICATE_CHAIN)
+            .ok_or_else(|| {
+                AuthenticateError::new(format!("no {CERTIFICATE_CHAIN} proof was presented"))
+            })?;
         let chain = Chain::from_pem(pem)?;
 
         let path = verify(
@@ -127,7 +112,7 @@ impl Authenticator for Verifier {
             &self.anchors,
             self.usage,
             self.revocation.as_ref(),
-            (self.clock)(),
+            self.clock.now(),
         )?;
         #[cfg(feature = "hybrid")]
         authenticate::x509::alt::verify_alt(&path, self.hybrid)?;
@@ -144,7 +129,7 @@ impl Authenticator for Verifier {
         let reported = presented
             .evidence
             .iter()
-            .find(|(evidence, _)| evidence == FINGERPRINT)
+            .find(|(evidence, _)| evidence == evidence::TLS_PEER_FINGERPRINT)
             .map(|(_, fingerprint)| fingerprint.trim());
         if let Some(reported) = reported
             && !reported.eq_ignore_ascii_case(&chain.fingerprint())
@@ -171,7 +156,8 @@ mod tests {
     }
 
     fn presented(issued: &Issued, subject: &str) -> Presented {
-        Presented::passed(mechanism::certificate(), subject).with_proof(CHAIN, &issued.pem)
+        Presented::passed(mechanism::certificate(), subject)
+            .with_proof(evidence::CERTIFICATE_CHAIN, &issued.pem)
     }
 
     #[test]
@@ -229,15 +215,17 @@ mod tests {
 
         verifier(&root)
             .verify(
-                &presented(&issued, "CN=partner-x.example,O=Partner X")
-                    .with_evidence(FINGERPRINT, chain.fingerprint().to_uppercase()),
+                &presented(&issued, "CN=partner-x.example,O=Partner X").with_evidence(
+                    evidence::TLS_PEER_FINGERPRINT,
+                    chain.fingerprint().to_uppercase(),
+                ),
             )
             .expect("the leaf's own");
 
         let failure = verifier(&root)
             .verify(
                 &presented(&issued, "CN=partner-x.example,O=Partner X")
-                    .with_evidence(FINGERPRINT, "SHA256:ab12"),
+                    .with_evidence(evidence::TLS_PEER_FINGERPRINT, "SHA256:ab12"),
             )
             .expect_err("refused");
         assert!(failure.message.contains("fingerprint"), "{failure}");
@@ -297,7 +285,10 @@ mod tests {
         let claim = Presented::passed(mechanism::certificate(), "CN=partner-x.example");
 
         let failure = verifier(&root).verify(&claim).expect_err("no proof");
-        assert!(failure.message.contains(CHAIN), "{failure}");
+        assert!(
+            failure.message.contains(evidence::CERTIFICATE_CHAIN),
+            "{failure}"
+        );
     }
 
     #[test]
