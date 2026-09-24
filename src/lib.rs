@@ -26,8 +26,10 @@ use authenticate::clock::Clock;
 #[cfg(feature = "hybrid")]
 pub use authenticate::x509::alt::Hybrid;
 use authenticate::x509::{Anchors, Chain, Name, Revocation, Usage, verify};
-use authenticate::{AuthenticateError, Authenticator, Presented};
+use authenticate::{AuthenticateError, Authenticator};
 use context::Verified;
+use context::property;
+use identify::Presented;
 use identify::evidence::{self, CERTIFICATE_CHAIN};
 use xcore::{Mechanism, mechanism};
 
@@ -129,7 +131,7 @@ impl Authenticator for Verifier {
         let reported = presented
             .evidence
             .iter()
-            .find(|(evidence, _)| evidence == evidence::TLS_PEER_FINGERPRINT)
+            .find(|(evidence, _)| evidence == property::TLS_PEER_FINGERPRINT)
             .map(|(_, fingerprint)| fingerprint.trim());
         if let Some(reported) = reported
             && !reported.eq_ignore_ascii_case(&chain.fingerprint())
@@ -216,7 +218,7 @@ mod tests {
         verifier(&root)
             .verify(
                 &presented(&issued, "CN=partner-x.example,O=Partner X").with_evidence(
-                    evidence::TLS_PEER_FINGERPRINT,
+                    property::TLS_PEER_FINGERPRINT,
                     chain.fingerprint().to_uppercase(),
                 ),
             )
@@ -225,7 +227,7 @@ mod tests {
         let failure = verifier(&root)
             .verify(
                 &presented(&issued, "CN=partner-x.example,O=Partner X")
-                    .with_evidence(evidence::TLS_PEER_FINGERPRINT, "SHA256:ab12"),
+                    .with_evidence(property::TLS_PEER_FINGERPRINT, "SHA256:ab12"),
             )
             .expect_err("refused");
         assert!(failure.message.contains("fingerprint"), "{failure}");
