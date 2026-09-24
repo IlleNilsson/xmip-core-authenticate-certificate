@@ -26,6 +26,9 @@ path = "src/lib.rs"
 # the names and the revocation lists are the capability's (ADR-0044).
 # context for Verified, xcore for the mechanism.
 authenticate = { package = "xmip-core-authenticate", git = "https://github.com/IlleNilsson/xmip-core-authenticate", branch = "main", features = ["x509"] }
+# identify for the names a claim carries across the gates (identify::evidence),
+# declared once for the first gate that writes them and this one that reads.
+identify = { package = "xmip-core-identify", git = "https://github.com/IlleNilsson/xmip-core-identify", branch = "main" }
 context = { package = "xmip-core-context", git = "https://github.com/IlleNilsson/xmip-core-context", branch = "main" }
 xcore = { package = "xmip-core", git = "https://github.com/IlleNilsson/xmip-core", branch = "main" }
 
