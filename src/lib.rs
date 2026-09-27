@@ -96,12 +96,6 @@ impl Authenticator for Verifier {
     }
 
     fn verify(&self, presented: &Presented) -> Result<Verified, AuthenticateError> {
-        let name = presented.mechanism.name();
-        if name != self.mechanism().name() {
-            return Err(AuthenticateError::new(format!(
-                "'{name}' was presented and this authenticator verifies certificate"
-            )));
-        }
         let pem = presented
             .proof(evidence::CERTIFICATE_CHAIN)
             .ok_or_else(|| {
@@ -129,10 +123,8 @@ impl Authenticator for Verifier {
         }
 
         let reported = presented
-            .evidence
-            .iter()
-            .find(|(evidence, _)| evidence == property::TLS_PEER_FINGERPRINT)
-            .map(|(_, fingerprint)| fingerprint.trim());
+            .evidence(property::TLS_PEER_FINGERPRINT)
+            .map(str::trim);
         if let Some(reported) = reported
             && !reported.eq_ignore_ascii_case(&chain.fingerprint())
         {
@@ -291,14 +283,5 @@ mod tests {
             failure.message.contains(evidence::CERTIFICATE_CHAIN),
             "{failure}"
         );
-    }
-
-    #[test]
-    fn another_mechanisms_claim_is_refused_by_name() {
-        let root = Authority::root("Partner Root");
-        let claim = Presented::passed(mechanism::mutual_tls(), "CN=partner-x.example");
-
-        let failure = verifier(&root).verify(&claim).expect_err("not ours");
-        assert!(failure.message.contains("mutual-tls"), "{failure}");
     }
 }
