@@ -156,60 +156,60 @@ mod tests {
 
     #[test]
     fn a_chain_to_a_held_anchor_naming_the_claim_is_proven() {
-        let root = Authority::root("Partner Root");
-        let issuing = root.intermediate("Partner Issuing CA");
-        let issued = issuing.issue("partner-x.example", NOW - DAY, NOW + DAY);
+        let root = Authority::root("Party Root");
+        let issuing = root.intermediate("Party Issuing CA");
+        let issued = issuing.issue("party-x.example", NOW - DAY, NOW + DAY);
 
         let verified = verifier(&root)
-            .verify(&presented(&issued, "O=Partner X, CN=partner-x.example"))
+            .verify(&presented(&issued, "O=Party X, CN=party-x.example"))
             .expect("proven");
         assert_eq!(verified, Verified::Proven);
     }
 
     #[test]
     fn a_verified_chain_that_names_someone_else_is_refused() {
-        let root = Authority::root("Partner Root");
-        let issued = root.issue("partner-x.example", NOW - DAY, NOW + DAY);
+        let root = Authority::root("Party Root");
+        let issued = root.issue("party-x.example", NOW - DAY, NOW + DAY);
 
         let failure = verifier(&root)
-            .verify(&presented(&issued, "CN=partner-y.example,O=Partner X"))
+            .verify(&presented(&issued, "CN=party-y.example,O=Party X"))
             .expect_err("refused");
         assert!(failure.message.contains("does not name"), "{failure}");
     }
 
     #[test]
     fn an_expired_certificate_is_refused_saying_so() {
-        let root = Authority::root("Partner Root");
-        let issued = root.issue("partner-x.example", NOW - 2 * DAY, NOW - DAY);
+        let root = Authority::root("Party Root");
+        let issued = root.issue("party-x.example", NOW - 2 * DAY, NOW - DAY);
 
         let failure = verifier(&root)
-            .verify(&presented(&issued, "CN=partner-x.example,O=Partner X"))
+            .verify(&presented(&issued, "CN=party-x.example,O=Party X"))
             .expect_err("refused");
         assert!(failure.message.contains("expired"), "{failure}");
     }
 
     #[test]
     fn a_revoked_certificate_is_refused_where_a_list_is_held() {
-        let root = Authority::root("Partner Root");
-        let issued = root.issue("partner-x.example", NOW - DAY, NOW + DAY);
+        let root = Authority::root("Party Root");
+        let issued = root.issue("party-x.example", NOW - DAY, NOW + DAY);
         let lists = Revocation::from_pem(&root.crl(&[&issued], NOW)).expect("a list");
 
         let failure = verifier(&root)
             .revoking(lists)
-            .verify(&presented(&issued, "CN=partner-x.example,O=Partner X"))
+            .verify(&presented(&issued, "CN=party-x.example,O=Party X"))
             .expect_err("refused");
         assert!(failure.message.contains("revoked"), "{failure}");
     }
 
     #[test]
     fn a_fingerprint_the_transport_reported_must_be_the_leafs() {
-        let root = Authority::root("Partner Root");
-        let issued = root.issue("partner-x.example", NOW - DAY, NOW + DAY);
+        let root = Authority::root("Party Root");
+        let issued = root.issue("party-x.example", NOW - DAY, NOW + DAY);
         let chain = Chain::from_pem(&issued.pem).expect("a chain");
 
         verifier(&root)
             .verify(
-                &presented(&issued, "CN=partner-x.example,O=Partner X").with_evidence(
+                &presented(&issued, "CN=party-x.example,O=Party X").with_evidence(
                     property::TLS_PEER_FINGERPRINT,
                     chain.fingerprint().to_uppercase(),
                 ),
@@ -218,7 +218,7 @@ mod tests {
 
         let failure = verifier(&root)
             .verify(
-                &presented(&issued, "CN=partner-x.example,O=Partner X")
+                &presented(&issued, "CN=party-x.example,O=Party X")
                     .with_evidence(property::TLS_PEER_FINGERPRINT, "SHA256:ab12"),
             )
             .expect_err("refused");
@@ -228,18 +228,18 @@ mod tests {
     #[cfg(feature = "hybrid")]
     #[test]
     fn a_hybrid_chain_is_proven_where_required_and_a_classical_one_is_not() {
-        let root = Authority::hybrid_root("Partner Root");
-        let issued = root.issue("partner-x.example", NOW - DAY, NOW + DAY);
-        let claim = presented(&issued, "CN=partner-x.example,O=Partner X");
+        let root = Authority::hybrid_root("Party Root");
+        let issued = root.issue("party-x.example", NOW - DAY, NOW + DAY);
+        let claim = presented(&issued, "CN=party-x.example,O=Party X");
 
         verifier(&root)
             .requiring(Hybrid::Required)
             .verify(&claim)
             .expect("quantum-safe end to end");
 
-        let classical = Authority::root("Partner Root");
-        let issued = classical.issue("partner-x.example", NOW - DAY, NOW + DAY);
-        let claim = presented(&issued, "CN=partner-x.example,O=Partner X");
+        let classical = Authority::root("Party Root");
+        let issued = classical.issue("party-x.example", NOW - DAY, NOW + DAY);
+        let claim = presented(&issued, "CN=party-x.example,O=Party X");
         verifier(&classical)
             .verify(&claim)
             .expect("where present, nothing to check");
@@ -257,10 +257,10 @@ mod tests {
     fn a_smart_card_certificate_proves_its_user_principal_name_in_either_spelling() {
         // ADR-0054: a claim that is a user principal name is proven by the
         // name the verified leaf carries for its user, compared as accounts.
-        let root = Authority::root("Partner Root");
-        let issued = root.issue_for_user("jane", "Jane@Partner-X.Example", NOW - DAY, NOW + DAY);
+        let root = Authority::root("Party Root");
+        let issued = root.issue_for_user("jane", "Jane@Party-X.Example", NOW - DAY, NOW + DAY);
 
-        for spelling in ["jane@partner-x.example", "PARTNER-X.EXAMPLE\\jane"] {
+        for spelling in ["jane@party-x.example", "PARTY-X.EXAMPLE\\jane"] {
             let verified = verifier(&root)
                 .verify(&presented(&issued, spelling))
                 .expect("the same account");
@@ -268,15 +268,15 @@ mod tests {
         }
 
         let failure = verifier(&root)
-            .verify(&presented(&issued, "john@partner-x.example"))
+            .verify(&presented(&issued, "john@party-x.example"))
             .expect_err("another account");
         assert!(failure.message.contains("does not name"), "{failure}");
     }
 
     #[test]
     fn a_claim_without_the_chain_proof_cannot_be_verified() {
-        let root = Authority::root("Partner Root");
-        let claim = Presented::passed(mechanism::certificate(), "CN=partner-x.example");
+        let root = Authority::root("Party Root");
+        let claim = Presented::passed(mechanism::certificate(), "CN=party-x.example");
 
         let failure = verifier(&root).verify(&claim).expect_err("no proof");
         assert!(

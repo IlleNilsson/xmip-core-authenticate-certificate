@@ -10,8 +10,8 @@ and presented it, with the chain the peer sent riding as the
 the node holds, at the clock it is given, against the CRLs it was configured
 with, then checks that the leaf names the claimed value — as its subject or
 one of its DNS names — and that the fingerprint the transport reported is
-the leaf's. A claim that is a user principal name, `jane@partner-x.example`
-or `PARTNER-X.EXAMPLE\jane`, is proven by the name a smart-card certificate
+the leaf's. A claim that is a user principal name, `jane@party-x.example`
+or `PARTY-X.EXAMPLE\jane`, is proven by the name a smart-card certificate
 carries for its user in its alternative names, compared as accounts
 (ADR-0054). Every refusal says why in words an operator can act on.
 
