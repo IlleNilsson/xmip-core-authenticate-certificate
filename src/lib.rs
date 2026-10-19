@@ -25,7 +25,7 @@
 use authenticate::clock::Clock;
 #[cfg(feature = "hybrid")]
 pub use authenticate::x509::alt::Hybrid;
-use authenticate::x509::{Anchors, Chain, Name, Revocation, Usage, verify};
+use authenticate::x509::{Anchors, Chain, Revocation, Usage, name, verify};
 use authenticate::{AuthenticateError, Authenticator};
 use context::Verified;
 use context::property;
@@ -115,7 +115,7 @@ impl Authenticator for Verifier {
         #[cfg(not(feature = "hybrid"))]
         drop(path);
 
-        if !Name::names(chain.leaf(), &presented.value)? {
+        if !name::names(chain.leaf(), &presented.value)? {
             return Err(AuthenticateError::new(format!(
                 "the verified certificate does not name '{}'",
                 presented.value
