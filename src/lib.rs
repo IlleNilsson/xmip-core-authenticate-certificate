@@ -202,7 +202,7 @@ mod tests {
     }
 
     #[test]
-    fn a_fingerprint_the_transport_reported_must_be_the_leafs() {
+    fn a_fingerprint_the_transport_reported_must_be_of_the_leaf() {
         let root = Authority::root("Party Root");
         let issued = root.issue("party-x.example", NOW - DAY, NOW + DAY);
         let chain = Chain::from_pem(&issued.pem).expect("a chain");
