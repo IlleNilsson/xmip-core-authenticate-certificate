@@ -110,10 +110,10 @@ impl Authenticator for Verifier {
             self.revocation.as_ref(),
             self.clock.now(),
         )?;
-        #[cfg(feature = "hybrid")]
-        authenticate::x509::alt::verify_alt(&path, self.hybrid)?;
-        #[cfg(not(feature = "hybrid"))]
-        drop(path);
+        cfg_select! {
+            feature = "hybrid" => authenticate::x509::alt::verify_alt(&path, self.hybrid)?,
+            _ => drop(path),
+        }
 
         if !name::names(chain.leaf(), &presented.value)? {
             return Err(AuthenticateError::new(format!(
