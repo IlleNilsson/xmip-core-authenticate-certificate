@@ -16,15 +16,18 @@ carries for its user in its alternative names, compared as accounts
 (ADR-0054). Every refusal says why in words an operator can act on.
 
 This is the certificate *outside* a TLS handshake — S/MIME in AS2, an OPC UA
-instance certificate — so nothing proved it before this gate did, and the
-usage the leaf must be for is configuration: any unless said. A certificate
-the handshake itself proved is `mutual-tls`, the sibling's.
+instance certificate — so nothing proved it before this gate did. The usage
+the leaf must be for is configuration, client authentication unless said: a
+certificate whose extended key usage names server authentication alone is a
+server's, and is refused as a client's. `.for_usage(Usage::Any)` admits any
+purpose, where a profile such as S/MIME names another. A certificate the
+handshake itself proved is `mutual-tls`, the sibling's.
 
 ## Configuration
 
 `Verifier::new(anchors)` with the anchors as PEM, then `.revoking(lists)`
-for CRLs, `.for_usage(Usage::ClientAuth)` to require that extended key
-usage, and `.with_clock(...)` where a test pins the time. Offline throughout
+for CRLs, `.for_usage(Usage::Any)` to admit a leaf for any purpose, and
+`.with_clock(...)` where a test pins the time. Offline throughout
 (ADR-0045): anchors and lists are held, never fetched; OCSP waits for the
 `online` switch.
 
@@ -58,7 +61,8 @@ here.
 
 `cargo test`: nine tests — a chain to a held anchor naming the claim is
 proven; one naming someone else, one expired, one revoked and one whose
-reported fingerprint is not the leaf's are refused saying so; a claim
+reported fingerprint is not the leaf's are refused saying so; a server's
+certificate is refused as a client's unless any usage is said; a claim
 without the chain proof, and another mechanism's claim, are refused by name;
 a hybrid chain is proven where required and a classical one is not; a
 smart-card certificate proves its user principal name in either spelling.
