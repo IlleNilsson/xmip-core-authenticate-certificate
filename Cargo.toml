@@ -44,6 +44,9 @@ hybrid = ["authenticate/x509-alt"]
 # its hybrid path through a dev-dependency on itself with the feature on.
 authenticate = { package = "xmip-core-authenticate", git = "https://github.com/IlleNilsson/xmip-core-authenticate", branch = "main", features = ["mint"] }
 xmip-core-authenticate-certificate = { path = ".", features = ["hybrid"] }
+# A server's certificate, its extended key usage serverAuth, which `mint`
+# does not issue: refused as a client's by the default usage. Test-only.
+rcgen = "0.14"
 
 [lints.rust]
 # forbid, not deny: a module has no business writing unsafe. The one exception

@@ -13,9 +13,11 @@
 //! (ADR-0045): anchors and lists are configuration, never fetched.
 //!
 //! This is the certificate outside a TLS handshake — S/MIME in AS2, an OPC UA
-//! instance certificate — so nothing proved it before this gate did, and the
-//! usage it must be for is configuration, `Usage::Any` unless said. The
-//! certificate a handshake proved is `mutual-tls`, another gate's.
+//! instance certificate — so nothing proved it before this gate did. The
+//! usage it must be for is configuration, client authentication unless
+//! said: a certificate whose extended key usage names server authentication
+//! alone is a server's, and is refused as a client's. The certificate a
+//! handshake proved is `mutual-tls`, another gate's.
 //!
 //! With the `hybrid` feature, a certificate that also carries an ML-DSA
 //! alternative signature (ITU-T X.509 (10/2019) clause 9.8) has that
@@ -45,14 +47,14 @@ pub struct Verifier {
 }
 
 impl Verifier {
-    /// Verifies against these anchors, for any usage, with no revocation
-    /// list and the system clock.
+    /// Verifies against these anchors, for client authentication, with no
+    /// revocation list and the system clock.
     #[must_use]
     pub fn new(anchors: Anchors) -> Self {
         Self {
             anchors,
             revocation: None,
-            usage: Usage::Any,
+            usage: Usage::ClientAuth,
             #[cfg(feature = "hybrid")]
             hybrid: Hybrid::WherePresent,
             clock: Clock::system(0),
@@ -75,7 +77,8 @@ impl Verifier {
         self
     }
 
-    /// Require the leaf to be for this usage.
+    /// Require the leaf to be for this usage; client authentication unless
+    /// said.
     #[must_use]
     pub const fn for_usage(mut self, usage: Usage) -> Self {
         self.usage = usage;
@@ -199,6 +202,45 @@ mod tests {
             .verify(&presented(&issued, "CN=party-x.example,O=Party X"))
             .expect_err("refused");
         assert!(failure.message.contains("revoked"), "{failure}");
+    }
+
+    #[test]
+    fn a_servers_certificate_is_refused_as_a_clients_unless_any_usage_is_said() {
+        use rcgen::{
+            BasicConstraints, CertificateParams, CertifiedIssuer, DnType, ExtendedKeyUsagePurpose,
+            IsCa, KeyPair,
+        };
+        let mut params = CertificateParams::new(Vec::<String>::new()).expect("params");
+        params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        let key = KeyPair::generate().expect("a key");
+        let root = CertifiedIssuer::self_signed(params, key).expect("a root");
+        let mut params =
+            CertificateParams::new(vec!["party-x.example".to_string()]).expect("params");
+        params
+            .distinguished_name
+            .push(DnType::CommonName, "party-x.example");
+        params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+        let key = KeyPair::generate().expect("a key");
+        let server = params.signed_by(&key, &root).expect("a server's");
+        let claim = Presented::passed(mechanism::certificate(), "CN=party-x.example")
+            .with_proof(evidence::CERTIFICATE_CHAIN, server.pem());
+        let anchors = || Anchors::from_pem(&root.pem()).expect("anchors");
+
+        let failure = Verifier::new(anchors())
+            .with_clock(|| NOW)
+            .verify(&claim)
+            .expect_err("a server's, not a client's");
+        assert!(
+            failure.message.contains("client authentication"),
+            "{failure}"
+        );
+
+        let verified = Verifier::new(anchors())
+            .for_usage(Usage::Any)
+            .with_clock(|| NOW)
+            .verify(&claim)
+            .expect("any usage, as configured");
+        assert_eq!(verified, Verified::Proven);
     }
 
     #[test]
