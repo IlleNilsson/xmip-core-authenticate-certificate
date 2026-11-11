@@ -45,8 +45,10 @@ hybrid = ["authenticate/x509-alt"]
 authenticate = { package = "xmip-core-authenticate", git = "https://github.com/IlleNilsson/xmip-core-authenticate", branch = "main", features = ["mint"] }
 xmip-core-authenticate-certificate = { path = ".", features = ["hybrid"] }
 # A server's certificate, its extended key usage serverAuth, which `mint`
-# does not issue: refused as a client's by the default usage. Test-only.
+# does not issue: refused as a client's by the default usage, and its key's
+# signature over what arrived, base64 by codec. Test-only.
 rcgen = "0.14"
+codec = { package = "xmip-core-library-codec", git = "https://github.com/IlleNilsson/xmip-core-library-codec", branch = "main" }
 
 [lints.rust]
 # forbid, not deny: a module has no business writing unsafe. The one exception
