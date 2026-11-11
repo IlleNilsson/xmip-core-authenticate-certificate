@@ -15,6 +15,21 @@ or `PARTY-X.EXAMPLE\jane`, is proven by the name a smart-card certificate
 carries for its user in its alternative names, compared as accounts
 (ADR-0054). Every refusal says why in words an operator can act on.
 
+**Proven only with possession.** A chain is anyone's to forward: it names
+someone and proves nothing about who sent it. The claim is proven only
+where the leaf's key signed this arrival — the `certificate.signature`
+proof over the `certificate.signed` attributes, a CMS SignerInfo's signed
+attributes as S/MIME signs them, whose `messageDigest` must be the
+`certificate.digest` the transport measured of this arrival's content, all
+base64 — checked by the capability's `x509::possessed`. A chain without
+that signature, one another key made, and the holder's own signature taken
+from an earlier arrival are each refused (the owner, 2026-11-10; ADR-0019,
+amendment 2026-11-11). The proofs carry attributes and a digest, never the
+content. The leaf's classical key is the one checked: under
+`Hybrid::Required` the path's alternative signatures are verified, and
+possession is still by the classical key alone. No transport reports the
+three proofs yet, so until one does a `certificate` claim is refused.
+
 This is the certificate *outside* a TLS handshake — S/MIME in AS2, an OPC UA
 instance certificate — so nothing proved it before this gate did. The usage
 the leaf must be for is configuration, client authentication unless said: a
@@ -59,12 +74,15 @@ here.
 
 ## Verification
 
-`cargo test`: nine tests — a chain to a held anchor naming the claim is
-proven; one naming someone else, one expired, one revoked and one whose
-reported fingerprint is not the leaf's are refused saying so; a server's
-certificate is refused as a client's unless any usage is said; a claim
-without the chain proof, and another mechanism's claim, are refused by name;
-a hybrid chain is proven where required and a classical one is not; a
-smart-card certificate proves its user principal name in either spelling.
+`cargo test`: ten tests — a chain to a held anchor naming the claim, its
+key's signature over this arrival beside it, is proven; one naming someone
+else, one expired, one revoked and one whose reported fingerprint is not
+the leaf's are refused saying so; a certificate without possession — no
+signature, another key's, or the holder's own replayed from an earlier
+arrival — is not proven; a server's certificate is
+refused as a client's unless any usage is said; a claim without the chain
+proof is refused by name; a hybrid chain is proven where required and a
+classical one is not; a smart-card certificate proves its user principal
+name in either spelling.
 The included workflow is manual-only and calls the versioned shared workflow
 at `IlleNilsson/.github@v1`.

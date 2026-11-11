@@ -12,6 +12,15 @@
 //! fingerprint the transport reported is the leaf's. Offline throughout
 //! (ADR-0045): anchors and lists are configuration, never fetched.
 //!
+//! **Proven only with possession.** A chain is anyone's to forward: it says
+//! who it names, never who sent it. So the claim is proven only where the
+//! leaf's key signed this arrival: the `certificate.signature` over the
+//! `certificate.signed` attributes, whose `messageDigest` is the
+//! `certificate.digest` the transport measured of this arrival's content
+//! (`authenticate::x509::possessed`), so a signature the holder made over
+//! an earlier arrival is refused too (ADR-0019, amendment 2026-11-11). The
+//! leaf's classical key is the one checked, hybrid or not.
+//!
 //! This is the certificate outside a TLS handshake — S/MIME in AS2, an OPC UA
 //! instance certificate — so nothing proved it before this gate did. The
 //! usage it must be for is configuration, client authentication unless
@@ -27,7 +36,7 @@
 use authenticate::clock::Clock;
 #[cfg(feature = "hybrid")]
 pub use authenticate::x509::alt::Hybrid;
-use authenticate::x509::{Anchors, Chain, Revocation, Usage, name, verify};
+use authenticate::x509::{Anchors, Chain, Revocation, Usage, name, possessed, verify};
 use authenticate::{AuthenticateError, Authenticator};
 use context::Verified;
 use context::property;
@@ -136,6 +145,7 @@ impl Authenticator for Verifier {
             ));
         }
 
+        possessed(&chain, presented)?;
         Ok(Verified::Proven)
     }
 }
@@ -143,7 +153,7 @@ impl Authenticator for Verifier {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use authenticate::x509::mint::{Authority, Issued};
+    use authenticate::x509::mint::{Authority, Issued, content_digest, signed_attributes};
 
     const NOW: i64 = 1_800_000_000;
     const DAY: i64 = 86_400;
@@ -152,9 +162,76 @@ mod tests {
         Verifier::new(Anchors::from_pem(&root.pem()).expect("anchors")).with_clock(|| NOW)
     }
 
+    /// What one arrival carried, which its sender signs.
+    const ARRIVED: &[u8] = b"Content-Type: application/edi-x12\r\n\r\nISA*00*";
+
+    /// The claim as its holder presents it: the chain, its key's signature
+    /// over this arrival's signed attributes, and the digest the transport
+    /// measured of its content.
     fn presented(issued: &Issued, subject: &str) -> Presented {
+        issued.possessing(chain_only(issued, subject), ARRIVED)
+    }
+
+    /// The claim as anyone who saw the certificate could present it.
+    fn chain_only(issued: &Issued, subject: &str) -> Presented {
         Presented::passed(mechanism::certificate(), subject)
             .with_proof(evidence::CERTIFICATE_CHAIN, &issued.pem)
+    }
+
+    #[test]
+    fn a_certificate_without_possession_is_not_proven() {
+        // The owner, 2026-11-10: a Party only from what the sender proved. A
+        // chain to a held anchor naming the claim is anyone's to forward;
+        // without its key's signature over what arrived it proves nobody.
+        let root = Authority::root("Party Root");
+        let issued = root.issue("party-x.example", NOW - DAY, NOW + DAY);
+        let subject = "CN=party-x.example,O=Party X";
+
+        let forwarded = verifier(&root)
+            .verify(&chain_only(&issued, subject))
+            .expect_err("no possession");
+        assert!(
+            forwarded.message.contains(evidence::CERTIFICATE_SIGNATURE),
+            "{forwarded}"
+        );
+
+        let someone_else = root.issue("party-y.example", NOW - DAY, NOW + DAY);
+        let forged = someone_else.possessing(chain_only(&issued, subject), ARRIVED);
+        let failure = verifier(&root)
+            .verify(&forged)
+            .expect_err("another key signed it");
+        assert!(failure.message.contains("certificate's key"), "{failure}");
+
+        // The holder's own signature and the attributes it covers, both
+        // taken from an earlier arrival, replayed beside the public chain
+        // with this arrival's content: refused, its digest is another's.
+        let earlier = issued.possessing(chain_only(&issued, subject), b"an earlier AS2 message");
+        let this = content_digest(ARRIVED);
+        let replayed = chain_only(&issued, subject)
+            .with_proof(
+                evidence::CERTIFICATE_SIGNATURE,
+                earlier
+                    .proof(evidence::CERTIFICATE_SIGNATURE)
+                    .expect("signed"),
+            )
+            .with_proof(
+                evidence::CERTIFICATE_SIGNED,
+                earlier
+                    .proof(evidence::CERTIFICATE_SIGNED)
+                    .expect("covered"),
+            )
+            .with_proof(evidence::CERTIFICATE_DIGEST, codec::base64::encode(&this));
+        let failure = verifier(&root)
+            .verify(&replayed)
+            .expect_err("over another arrival");
+        assert!(failure.message.contains("another arrival"), "{failure}");
+
+        assert_eq!(
+            verifier(&root)
+                .verify(&presented(&issued, subject))
+                .expect("its holder"),
+            Verified::Proven
+        );
     }
 
     #[test]
@@ -222,8 +299,22 @@ mod tests {
         params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
         let key = KeyPair::generate().expect("a key");
         let server = params.signed_by(&key, &root).expect("a server's");
+        let attributes = signed_attributes(ARRIVED);
+        let signature = rcgen::SigningKey::sign(&key, &attributes).expect("signed");
         let claim = Presented::passed(mechanism::certificate(), "CN=party-x.example")
-            .with_proof(evidence::CERTIFICATE_CHAIN, server.pem());
+            .with_proof(evidence::CERTIFICATE_CHAIN, server.pem())
+            .with_proof(
+                evidence::CERTIFICATE_SIGNATURE,
+                codec::base64::encode(&signature),
+            )
+            .with_proof(
+                evidence::CERTIFICATE_SIGNED,
+                codec::base64::encode(&attributes),
+            )
+            .with_proof(
+                evidence::CERTIFICATE_DIGEST,
+                codec::base64::encode(&content_digest(ARRIVED)),
+            );
         let anchors = || Anchors::from_pem(&root.pem()).expect("anchors");
 
         let failure = Verifier::new(anchors())
