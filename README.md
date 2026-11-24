@@ -43,8 +43,9 @@ handshake itself proved is `mutual-tls`, the sibling's.
 `Verifier::new(anchors)` with the anchors as PEM, then `.revoking(lists)`
 for CRLs, `.for_usage(Usage::Any)` to admit a leaf for any purpose, and
 `.with_clock(...)` where a test pins the time. Offline throughout
-(ADR-0045): anchors and lists are held, never fetched; OCSP waits for the
-`online` switch.
+(ADR-0045): anchors and lists are held, never fetched; OCSP waits for a
+node declaring the Node capability `online` (ADR-0056, amendment
+2026-11-24).
 
 ## Hybrid, behind a feature
 
