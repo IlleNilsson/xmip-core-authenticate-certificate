@@ -68,11 +68,6 @@ beneath is webpki over ring, the one place the estate admits it (ADR-0033).
 The tests mint their own chains through the capability's `mint` feature,
 which ships in no build.
 
-## Toolchain
-
-`rust-toolchain.toml` pins the toolchain for the whole estate. Do not change it
-here.
-
 ## Verification
 
 `cargo test`: ten tests — a chain to a held anchor naming the claim, its
