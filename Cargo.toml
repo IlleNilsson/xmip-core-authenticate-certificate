@@ -14,12 +14,12 @@ path = "src/lib.rs"
 # The gate's own trait, with its x509 module turned on: the chain walk,
 # the names and the revocation lists are the capability's (ADR-0044).
 # context for Verified, xcore for the mechanism.
-authenticate = { package = "xmip-core-authenticate", git = "https://github.com/IlleNilsson/xmip-core-authenticate", branch = "main", features = ["x509"] }
+authenticate = { workspace = true, features = ["x509"] }
 # identify for the names a claim carries across the gates (identify::evidence),
 # declared once for the first gate that writes them and this one that reads.
-identify = { package = "xmip-core-identify", git = "https://github.com/IlleNilsson/xmip-core-identify", branch = "main" }
-context = { package = "xmip-core-context", git = "https://github.com/IlleNilsson/xmip-core-context", branch = "main" }
-xcore = { package = "xmip-core", git = "https://github.com/IlleNilsson/xmip-core", branch = "main" }
+identify = { workspace = true }
+context = { workspace = true }
+xcore = { workspace = true }
 
 [features]
 # Hybrid certificates (ITU-T X.509 (10/2019) clause 9.8): the ML-DSA
@@ -31,13 +31,13 @@ hybrid = ["authenticate/x509-alt"]
 [dev-dependencies]
 # The tests mint their own chains; `mint` ships in no build. The crate tests
 # its hybrid path through a dev-dependency on itself with the feature on.
-authenticate = { package = "xmip-core-authenticate", git = "https://github.com/IlleNilsson/xmip-core-authenticate", branch = "main", features = ["mint"] }
+authenticate = { workspace = true, features = ["mint"] }
 xmip-core-authenticate-certificate = { path = ".", features = ["hybrid"] }
 # A server's certificate, its extended key usage serverAuth, which `mint`
 # does not issue: refused as a client's by the default usage, and its key's
 # signature over what arrived, base64 by codec. Test-only.
 rcgen = "0.14"
-codec = { package = "xmip-core-library-codec", git = "https://github.com/IlleNilsson/xmip-core-library-codec", branch = "main" }
+codec = { workspace = true }
 
 [lints]
 workspace = true
